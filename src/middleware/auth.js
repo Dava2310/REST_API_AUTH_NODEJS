@@ -1,7 +1,12 @@
-import db from '../DB/mysql.js'
 import jwt from 'jsonwebtoken'
 import config from '../config.js'
 import responds from '../red/responds.js'
+
+// Models
+import User from '../models/UserModel.js'
+import invalidTokens from '../models/InvalidTokens.js'
+const UserModel = User.UserModel
+const invalidTokensModel = invalidTokens.invalidTokensModel
 
 // Middleware to ensure authentication with JWT
 const ensureAuthenticated = async (req, res, next) => {
@@ -13,7 +18,8 @@ const ensureAuthenticated = async (req, res, next) => {
     }
 
     // Checking if this accessToken is in blacklist
-    const check = await db.findOneRecord('invalidTokens', {accessToken: accessToken})
+    const check = await invalidTokensModel.findOneRecord({accessToken: accessToken})
+    //return responds.success(req, res, check, 200);
 
     if (check) {
         return responds.error(req, res, {message: 'Access token invalid', code: 'AccessTokenInvalid'}, 401)
@@ -22,7 +28,6 @@ const ensureAuthenticated = async (req, res, next) => {
 
     try {
         const decodedAccessToken = jwt.verify(accessToken, config.jwt.secret);
-        //return responds.success(req, res, {decodedAccessToken}, 200);
         
         // Adding user object to the request with information provided by jwt
         // Remember: Don't include critical information
@@ -51,7 +56,7 @@ const ensureAuthenticated = async (req, res, next) => {
 // Middleware to ensure authorization by user roles
 const authorize = (roles = []) => {
     return async function (req, res, next) {
-        const user = await db.findOneRecord('users',{id: req.user.id});
+        const user = await UserModel.findOneRecord({id: req.user.id});
 
         if (!user || !roles.includes(user.role)) {
             return responds.error(req, res, {message: 'Access denied'}, 403)

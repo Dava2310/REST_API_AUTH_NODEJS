@@ -23,11 +23,20 @@ const createRecord = async (table, data) => {
     }
 };
 
-const updateRecord = async (table, data, id) => {
+const updateRecord = async (table, data, conditions = {}) => {
+    // Construir la parte de SET con los datos a actualizar
     const setClause = Object.keys(data).map(key => `${key} = ?`).join(', ');
-    const values = [...Object.values(data), id];
+    const setValues = Object.values(data);
 
-    const sql = `UPDATE ${table} SET ${setClause} WHERE id = ?`;
+    // Construir la parte de WHERE con las condiciones
+    const whereClause = Object.keys(conditions).map(key => `${key} = ?`).join(' AND ');
+    const whereValues = Object.values(conditions);
+
+    // Combinar los valores de SET y WHERE
+    const values = [...setValues, ...whereValues];
+
+    // Construir la consulta SQL
+    const sql = `UPDATE ${table} SET ${setClause} WHERE ${whereClause}`;
 
     try {
         const [result] = await pool.execute(sql, values);
@@ -61,26 +70,24 @@ const findOneRecord = async (table, conditions = {}) => {
     return result[0] || null;
 };
 
-const deleteRecord = async (table, id) => {
-    const sql = `DELETE FROM ${table} WHERE id = ?`;
+const deleteRecord = async (table, conditions = {}) => {
+    const whereClause = Object.keys(conditions)
+        .map(key => `${key} = ?`)
+        .join(' AND ');
+
+    const values = Object.values(conditions);
+
+    let sql = `DELETE FROM ${table}`;
+    if (whereClause) {
+        sql += ` WHERE ${whereClause}`;
+    }
 
     try {
-        const [result] = await pool.execute(sql, [id]);
+        const [result] = await pool.execute(sql, values);
         return result;
     } catch (error) {
         throw error;
     }
 };
 
-const deleteRecord_jwt = async (table, id) => {
-    const sql = `DELETE FROM ${table} WHERE userId = ?`;
-
-    try {
-        const [result] = await pool.execute(sql, [id]);
-        return result;
-    } catch (error) {
-        throw error;
-    }
-};
-
-export default { pool, createRecord, updateRecord, findRecords, findOneRecord, deleteRecord, deleteRecord_jwt };
+export default { pool, createRecord, updateRecord, findRecords, findOneRecord, deleteRecord };
