@@ -1,9 +1,9 @@
 // Help functions
 import { compare, hashSync } from 'bcrypt';
-import db from '../../DB/mysql.js'
 import jwt from 'jsonwebtoken'
 import config from '../../config.js';
 import responds from '../../red/responds.js';
+import Joi from 'joi';
 
 // Models
 import IT from '../../models/InvalidTokens.js'
@@ -14,46 +14,40 @@ const invalidTokensModel = IT.invalidTokensModel
 const refreshTokensModel = RT.refreshTokensModel
 const UserModel = User.UserModel
 
-// Roles permitted in the system
-const roles_permitted = ['admin', 'moderator', 'user']
+// Schema validation
+import schema from '../../validations/userValidation.js';
 
 const registerUser = async (req, res) => {
     try {
-        // Getting data from request
-        const { name, email, role, password } = req.body;
-
-        // Validating data
-        if (!name || !email || !role || !password) {
-            return responds.error(req, res, { message: 'Please fill all fields' }, 422)
-        }
-
-        if (!roles_permitted.includes(role)) {
-            return responds.error(req, res, { message: 'Unkown role' }, 422)
-        }
+        // Getting data from request and validating it
+        const result = await schema.userRegister.validateAsync(req.body)
 
         // Checking for email duplication
-        // const check = await db.findOneRecord('users', {email: email})
-
-        if (await UserModel.findOneRecord({ email: email })) {
+        if (await UserModel.findOneRecord({ email: result.email })) {
             return responds.error(req, res, { message: 'Email already exists' }, 409)
         }
 
         // Encrypting password
-        const newPassword = hashSync(password, 10);
+        const newPassword = hashSync(result.password, 10);
 
         const newUser = {
-            name,
-            email,
-            role,
+            name: result.name,
+            email: result.email,
+            role: result.role,
             password: newPassword
         }
 
         // Inserting new User into DB
-        // await db.createRecord('users', newUser)
         await UserModel.createRecord(newUser)
         return responds.success(req, res, { message: 'User registered successfully' }, 201)
 
     } catch (error) {
+        
+        // Returning validations error
+        if (error instanceof Joi.ValidationError) {
+            return responds.error(req, res, { message: error.details[0].message }, 422)
+        }
+
         return responds.error(req, res, { message: error.message }, 500)
     }
 
@@ -62,22 +56,17 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
     try {
 
-        // Getting data from the request
-        const { email, password } = req.body
+        // Getting data from the request and validating it
+        const result = await schema.userLogin.validateAsync(req.body)
 
-        // Checking empty fields
-        if (!email || !password) {
-            return responds.error(req, res, { message: 'Please fill all fields' }, 422)
-        }
-
-        // Searching the user by the email
-        const user = await UserModel.findOneRecord({ email: email });
+        // Searching if an user exists with this email
+        const user = await UserModel.findOneRecord({ email: result.email });
         if (!user) {
             return responds.error(req, res, { message: 'Email or password is invalid' }, 401)
         }
 
-        // Searching for password matching
-        const passwordMatch = await compare(password, user.password);
+        // Searching if the password matches with the user password registered in DB
+        const passwordMatch = await compare(result.password, user.password);
         if (!passwordMatch) {
             return responds.error(req, res, { message: 'Email or password is invalid' }, 401)
         }
