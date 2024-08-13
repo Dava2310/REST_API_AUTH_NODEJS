@@ -9,6 +9,18 @@ const UserModel = User.UserModel
 const invalidTokensModel = invalidTokens.invalidTokensModel
 
 // Middleware to ensure authentication with JWT
+/**
+ * Middleware to ensure authentication with JWT.
+ * This function verifies the access token provided in the request headers.
+ * If the token is valid, it adds user information to the request object.
+ * If the token is invalid or expired, it returns an appropriate error response.
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @param {Function} next - The next middleware function in the stack.
+ *
+ * @returns {void}
+ */
 const ensureAuthenticated = async (req, res, next) => {
 
     // Getting access token from request headers
@@ -19,7 +31,6 @@ const ensureAuthenticated = async (req, res, next) => {
 
     // Checking if this accessToken is in blacklist
     const check = await invalidTokensModel.findOneRecord({accessToken: accessToken})
-    //return responds.success(req, res, check, 200);
 
     if (check) {
         return responds.error(req, res, {message: 'Access token invalid', code: 'AccessTokenInvalid'}, 401)
@@ -28,7 +39,7 @@ const ensureAuthenticated = async (req, res, next) => {
 
     try {
         const decodedAccessToken = jwt.verify(accessToken, config.jwt.secret);
-        
+
         // Adding user object to the request with information provided by jwt
         // Remember: Don't include critical information
         req.accessToken = {
@@ -52,6 +63,7 @@ const ensureAuthenticated = async (req, res, next) => {
 
     }
 }
+
 
 // Middleware to ensure authorization by user roles
 const authorize = (roles = []) => {
