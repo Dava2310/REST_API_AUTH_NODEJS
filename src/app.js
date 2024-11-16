@@ -1,13 +1,13 @@
-
 // Importing necessary modules and configurations from config.js and red/responds.js files
+import morgan from 'morgan';
 import config from './config.js';
 import express from "express";
 import responds from './red/responds.js';
 import cors from 'cors';
 
 // Importing routes
-import userRoutes from './modules/users/routes.js';
-import authRoutes from './modules/auth/routes.js';
+import userRoutes from './routes/users.routes.js';
+import authRoutes from './routes/auth.routes.js';
 
 // Import Swagger setup
 import swaggerSetup from './swagger.js';  // Ajusta la ruta si es necesario
@@ -25,6 +25,9 @@ app.use(express.json());
 
 // Configuration of the app
 app.set('port', config.app.port);
+
+// Middlewares
+app.use(morgan('dev'));
 
 // Including routes
 app.use(userRoutes);

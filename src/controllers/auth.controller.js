@@ -8,26 +8,20 @@ import Joi from 'joi'; // Joi for schema validation
 // --------------------
 // Configuration
 // --------------------
-import config from '../../config.js'; // Configuration settings for the application
+import config from '../config.js'; // Configuration settings for the application
 
 // --------------------
 // Utility Modules
 // --------------------
-import responds from '../../red/responds.js'; // Utility functions for standardized API responses
+import responds from '../red/responds.js'; // Utility functions for standardized API responses
 
 // --------------------
-// Database Models
+// Prisma Module
 // --------------------
-import IT from '../../models/InvalidTokens.js' // Model for managing invalid tokens
-import RT from '../../models/RefreshTokens.js' // Model for managing refresh tokens
-import User from '../../models/UserModel.js'; // Model for managing user records
-
-const invalidTokensModel = IT.invalidTokensModel; // Instance of the invalid tokens model
-const refreshTokensModel = RT.refreshTokensModel; // Instance of the refresh tokens model
-const UserModel = User.UserModel; // Instance of the user model
+import prisma from '../../prisma/prismaClient.js'
 
 // Schema validation
-import schema from '../../validations/userValidation.js'; // Schema for user input validation
+import schema from '../validations/userValidation.js'; // Schema for user input validation
 
 /**
  * Registers a new user by validating input data, checking for email duplication,
@@ -43,27 +37,32 @@ const registerUser = async (req, res) => {
         const result = await schema.userRegister.validateAsync(req.body);
 
         // Check for existing user with the same email address
-        if (await UserModel.findOneRecord({ email: result.email })) {
-            // Respond with an error if the email already exists
-            return responds.error(req, res, { message: 'Email already exists' }, 409);
-        }
+        const existingUser = await prisma.usuario.findUnique({
+            where: {
+                email: result.email
+            }
+        })
 
+        if (existingUser) {
+            return responds.error(req, res, { message: 'El correo ya está en uso.' }, 409);
+        }
+        
         // Encrypt the password using bcrypt before storing it
         const newPassword = hashSync(result.password, 10);
 
         // Construct a new user object with the registration details
-        const newUser = {
-            name: result.name,
-            email: result.email,
-            role: result.role,
-            password: newPassword
-        };
-
-        // Insert the new user record into the database
-        await UserModel.createRecord(newUser);
+        const newUser = await prisma.usuario.create({
+            data: {
+                cargo: result.cargo,
+                nombre: result.nombre,
+                apellido: result.apellido,
+                password: newPassword,
+                email: result.email,
+            }
+        })
 
         // Respond with a success message upon successful registration
-        return responds.success(req, res, { message: 'User registered successfully' }, 201);
+        return responds.success(req, res, { message: 'Usuario registrado exitosamente.' }, 201);
 
     } catch (error) {
         // Handle validation errors specifically from Joi
@@ -75,6 +74,7 @@ const registerUser = async (req, res) => {
         return responds.error(req, res, { message: error.message }, 500);
     }
 };
+
 
 /**
  * @function loginUser
@@ -89,15 +89,21 @@ const loginUser = async (req, res) => {
         const result = await schema.userLogin.validateAsync(req.body);
 
         // Check if user exists
-        const user = await UserModel.findOneRecord({ email: result.email });
+        const user = await prisma.usuario.findUnique({
+            where: {
+                email: result.email
+            }
+        })
+
+
         if (!user) {
-            return responds.error(req, res, { message: 'Email or password is invalid' }, 401);
+            return responds.error(req, res, { message: 'El correo o la contraseña es inválida.' }, 401);
         }
 
         // Verify password
         const passwordMatch = await compare(result.password, user.password);
         if (!passwordMatch) {
-            return responds.error(req, res, { message: 'Email or password is invalid' }, 401);
+            return responds.error(req, res, { message: 'El correo o la contraseña es inválida.' }, 401);
         }
 
         // Generate access and refresh tokens
@@ -120,18 +126,23 @@ const loginUser = async (req, res) => {
         );
 
         // Store refresh token in database
-        await refreshTokensModel.createRecord({ refreshToken, userId: user.id });
-
+        await prisma.refreshToken.create({
+            data: {
+                refreshToken: refreshToken,
+                userId: user.id
+            }
+        })
+        
         // Respond with user data and tokens
         const data = {
             id: user.id,
-            name: user.name,
+            nombre: user.nombre,
             email: user.email,
-            role: user.role,
+            cargo: user.cargo,
             accessToken,
             refreshToken
         };
-        return responds.success(req, res, { data }, 200);
+        return responds.success(req, res, {data, message: 'Ha ingresado exitosamente.'} , 200);
 
     } catch (error) {
         // Handle errors
@@ -160,13 +171,24 @@ const refreshToken = async (req, res) => {
         const decodedRefreshToken = jwt.verify(refreshToken, config.jwt.refresh_secret);
 
         // Check if the refresh token exists in the database
-        const userRefreshToken = await refreshTokensModel.findOneRecord({ refreshToken: refreshToken, userId: decodedRefreshToken.userId });
+        const userRefreshToken = await prisma.refreshToken.findFirst({
+            where: {
+                refreshToken: refreshToken,
+                userId: decodedRefreshToken.userId
+            }
+        })
+
+        //const userRefreshToken = await refreshTokensModel.findOneRecord({ refreshToken: refreshToken, userId: decodedRefreshToken.userId });
         if (!userRefreshToken) {
             return responds.error(req, res, { message: 'Refresh token invalid or expired' }, 401);
         }
 
         // Remove the old refresh token from the database
-        await refreshTokensModel.deleteRecord({ id: userRefreshToken.id });
+        await prisma.refreshToken.delete({
+            where: {
+                id: userRefreshToken.id
+            }
+        })
 
         // Generate new access token
         const accessToken = jwt.sign(
@@ -188,12 +210,12 @@ const refreshToken = async (req, res) => {
             }
         );
 
-        // Store the new refresh token in the database
-        const newToken = {
-            refreshToken: newRefreshToken,
-            userId: decodedRefreshToken.userId
-        };
-        await refreshTokensModel.createRecord(newToken);
+        await prisma.refreshToken.create({
+            data: {
+                refreshToken: newRefreshToken,
+                userId: decodedRefreshToken.userId
+            }
+        })
 
         // Respond with new access and refresh tokens
         const data = {
@@ -224,17 +246,31 @@ const refreshToken = async (req, res) => {
 const logoutUser = async (req, res) => {
     try {
         // Delete all refresh tokens associated with the user
-        await refreshTokensModel.deleteRecord({ userId: req.user.id });
+        await prisma.refreshToken.deleteMany({
+            where: {
+                userId: req.user.id
+            }
+        })
+        
+        //await refreshTokensModel.deleteRecord({ userId: req.user.id });
 
         // Prepare data for invalidating the current access token
-        const userInvalidToken = {
-            accessToken: req.accessToken.value,
-            userId: req.user.id,
-            expirationTime: req.accessToken.exp
-        };
+        // const userInvalidToken = {
+        //     accessToken: req.accessToken.value,
+        //     userId: req.user.id,
+        //     expirationTime: req.accessToken.exp
+        // };
 
         // Insert the access token into the blacklist to prevent further use
-        await invalidTokensModel.createRecord(userInvalidToken);
+        const userInvalidToken = await prisma.invalidToken.create({
+            data: {
+                accessToken: req.accessToken.value,
+                userId: req.user.id,
+                expirationTime: req.accessToken.exp
+            }
+        })
+
+        //await invalidTokensModel.createRecord(userInvalidToken);
 
         // Respond with a success message and a 204 No Content status code
         return responds.success(req, res, '', 204);
@@ -244,4 +280,49 @@ const logoutUser = async (req, res) => {
         return responds.error(req, res, { message: error.message }, 500);
     }
 };
-export default { registerUser, loginUser, refreshToken, logoutUser }
+
+const changePassword = async (req,res) => {
+
+    try {
+        // Getting user after authentication with JWT
+        // Validate and extract user registration data from the request body
+        const result = await schema.changePassword.validateAsync(req.body);
+
+        const user = await prisma.usuario.findUnique({where: {
+            id: req.user.id
+        }})
+
+        if (!user) {
+            return responds.success(req, res, {message: 'Hubo un error. Intente de nuevo'}, 404);
+        }
+
+        // Validating old password
+        const validOldPassword = await compare(result.currentPassword, user.password);
+
+        if (!validOldPassword) {
+            return responds.error(req, res, {message: 'La contraseña actual no es correcta.'}, 409)
+        }
+
+        // Updating password
+        const hashedPassword = hashSync(result.newPassword, 10);
+        
+        await prisma.usuario.update({
+            where: { id: user.id },
+            data: { password: hashedPassword }
+        })
+
+        return responds.success(req, res, {message: 'Contraseña actualizada correctamente.'}, 200);
+
+    } catch (error) {
+
+        // Handle validation errors specifically from Joi
+        if (error instanceof Joi.ValidationError) {
+            return responds.error(req, res, { message: error.details[0].message }, 422);
+        }
+
+        return responds.error(req, res, { message: error.message}, 500);
+    }
+
+}
+
+export default { registerUser, loginUser, refreshToken, logoutUser, changePassword }

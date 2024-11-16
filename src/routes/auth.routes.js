@@ -1,9 +1,10 @@
 import { Router } from 'express'
-import auth from '../../middleware/auth.js';
+import auth from '../middleware/auth.js';
 
 // Controller
-import ctrl from './controller.js'
-const {registerUser, loginUser, refreshToken, logoutUser} = ctrl
+import ctrl from '../controllers/auth.controller.js'
+import responds from '../red/responds.js';
+const {registerUser, loginUser, refreshToken, logoutUser, changePassword} = ctrl
 
 const router = Router();
 
@@ -220,6 +221,14 @@ router.post('/api/auth/register', registerUser);
  */
 router.post('/api/auth/login', loginUser);
 
+router.get('/api/auth/verify-token', auth.ensureAuthenticated, (req, res) => {
+    try {
+        responds.success(req, res, {message: "Token is valid"}, 200);
+    } catch (error) {
+        responds.error(req, res, {message: error.message}, 400);
+    }
+})
+
 /**
  * @swagger
  * /api/auth/refresh-token:
@@ -335,5 +344,7 @@ router.post('/api/auth/refresh-token', refreshToken);
  *                       example: Internal server error
  */
 router.get('/api/auth/logout', auth.ensureAuthenticated, logoutUser);
+
+router.patch('/api/auth/changePassword', auth.ensureAuthenticated, changePassword);
 
 export default router;

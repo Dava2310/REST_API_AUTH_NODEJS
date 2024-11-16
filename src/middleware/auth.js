@@ -1,12 +1,15 @@
 import jwt from 'jsonwebtoken'
 import config from '../config.js'
 import responds from '../red/responds.js'
+import { PrismaClient } from '@prisma/client'
 
 // Models
 import User from '../models/UserModel.js'
 import invalidTokens from '../models/InvalidTokens.js'
 const UserModel = User.UserModel
 const invalidTokensModel = invalidTokens.invalidTokensModel
+
+const prisma = new PrismaClient();
 
 // Middleware to ensure authentication with JWT
 /**
@@ -23,22 +26,36 @@ const invalidTokensModel = invalidTokens.invalidTokensModel
  */
 const ensureAuthenticated = async (req, res, next) => {
 
-    // Getting access token from request headers
-    const accessToken = req.headers.authorization
-    if (!accessToken) {
-        return responds.error(req, res, {message: 'Access token not found'}, 401);
-    }
-
-    // Checking if this accessToken is in blacklist
-    const check = await invalidTokensModel.findOneRecord({accessToken: accessToken})
-
-    if (check) {
-        return responds.error(req, res, {message: 'Access token invalid', code: 'AccessTokenInvalid'}, 401)
-    }
-
-
     try {
-        const decodedAccessToken = jwt.verify(accessToken, config.jwt.secret);
+
+        // Getting access token from request headers
+        const accessToken = req.headers.authorization
+
+        if (!accessToken) {
+            return responds.error(req, res, { message: 'Access token not found' }, 401);
+        }
+
+        let token;
+
+        if (accessToken.startsWith('Bearer ')) {
+            token = accessToken.split(' ')[1];
+        } else {
+            token = accessToken;
+        }
+
+        // Checking if this accessToken is in blacklist
+        // const check = await invalidTokensModel.findOneRecord({accessToken: token})
+        const check = await prisma.invalidToken.findFirst({
+            where: {
+                accessToken: token
+            }
+        })
+
+        if (check) {
+            return responds.error(req, res, { message: 'Access token invalid', code: 'AccessTokenInvalid' }, 401)
+        }
+
+        const decodedAccessToken = jwt.verify(token, config.jwt.secret);
 
         // Adding user object to the request with information provided by jwt
         // Remember: Don't include critical information
@@ -54,11 +71,12 @@ const ensureAuthenticated = async (req, res, next) => {
     } catch (error) {
 
         if (error instanceof jwt.TokenExpiredError) {
-            return responds.error(req, res, {message: 'Access token expired', code: 'AccessTokenExpired'}, 401)
+            return responds.error(req, res, { message: 'Access token expired', code: 'AccessTokenExpired' }, 401)
         } else if (error instanceof jwt.JsonWebTokenError) {
-            return responds.error(req, res, {message: 'Access token invalid', code: 'AccessTokenInvalid'}, 401)
+            console.log('error there')
+            return responds.error(req, res, { message: 'Access token invalid', code: 'AccessTokenInvalid' }, 401)
         } else {
-            return responds.error(req, res, {message: error.message}, 500)
+            return responds.error(req, res, { message: error.message }, 500)
         }
 
     }
@@ -66,16 +84,26 @@ const ensureAuthenticated = async (req, res, next) => {
 
 
 // Middleware to ensure authorization by user roles
-const authorize = (roles = []) => {
+const authorize = (cargos = []) => {
     return async function (req, res, next) {
-        const user = await UserModel.findOneRecord({id: req.user.id});
 
-        if (!user || !roles.includes(user.role)) {
-            return responds.error(req, res, {message: 'Access denied'}, 403)
+        try {
+            //const user = await UserModel.findOneRecord({id: req.user.id});
+            const user = await prisma.usuario.findUnique({
+                where: {
+                    id: req.user.id
+                }
+            })
+
+            if (!user || !cargos.includes(user.cargo)) {
+                return responds.error(req, res, { message: 'Usted no cuenta con este nivel de modificación.' }, 403)
+            }
+
+            next();
+        } catch (error) {
+            return responds.error(req, res, { message: error.message }, 500)
         }
-
-        next();
     }
 }
 
-export default {ensureAuthenticated, authorize};
+export default { ensureAuthenticated, authorize };
